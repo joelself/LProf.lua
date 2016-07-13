@@ -36,7 +36,8 @@ local FORMAT_TOTALTIME_LINE    = "| TOTAL TIME = %f\n"
 local FORMAT_MEMORY_LINE 	   = "| %-20s: %-16s: %-16s| %s\n"
 local FORMAT_HIGH_MEMORY_LINE  = "H %-20s: %-16s: %-16sH %s\n"
 local FORMAT_LOW_MEMORY_LINE   = "L %-20s: %-16s: %-16sL %s\n"
-local FORMAT_TITLE             = "%-50.50s: %-40.40s: %-20s"
+local FORMAT_TITLE             = "%-90.90s: %-30.30s: %-10s"
+local FORMAT_TITLE_KEY		   = "%s : %s : %d"
 local FORMAT_LINENUM           = "%4i"
 local FORMAT_TIME              = "%04.3f"
 local FORMAT_RELATIVE          = "%03.2f%%"
@@ -137,6 +138,12 @@ function ProFi:reset()
 	self.hookCount = self.hookCount or DEFAULT_DEBUG_HOOK_COUNT
 	self.sortMethod = self.sortMethod or sortByDurationDesc
 	self.inspect = nil
+	self.nameWidth = 8 -- length of the header string "FUNCTION"
+	self.sourceWidth = 4 -- length of the header string "FILE"
+	self.linedefinedWidth = 4 -- length of the header string "LINE"
+	self.timerWidth = 4 -- length of the header string "TIME"
+	self.countWidth = 6 -- length of the header string "CALLED"
+	self.relTimeWidth = 8 -- length of the header string "RELATIVE"
 end
 
 --[[
@@ -215,18 +222,29 @@ function ProFi:getTitleFromFuncInfo( funcInfo )
 	local name        = funcInfo.name or 'anonymous'
 	local source      = funcInfo.short_src or 'C_FUNC'
 	local linedefined = funcInfo.linedefined or 0
-	linedefined = string.format( FORMAT_LINENUM, linedefined )
-	return string.format(FORMAT_TITLE, source, name, linedefined)
+	return string.format(FORMAT_TITLE_KEY, source, name, linedefined)
 end
 
 function ProFi:createFuncReport( funcInfo )
 	local name = funcInfo.name or 'anonymous'
 	local source = funcInfo.source or 'C Func'
 	local linedefined = funcInfo.linedefined or 0
+	linedefined = string.format( '%4i', linedefined )
+	if string.len(name) > self.nameWidth then
+		self.nameWidth = string.len(name)
+	end
+	if string.len(source) > self.sourceWidth then
+		self.sourceWidth = string.len(source)
+	end
+	if string.len(linedefined) > self.linedefinedWidth then
+		self.linedefinedWidth = string.len(linedefined)
+	end
 	local funcReport = {
-		['title']         = self:getTitleFromFuncInfo( funcInfo );
-		['count'] = 0;
-		['timer']         = 0;
+		['name']        = name;
+		['source']      = source;
+		['linedefined'] = linedefined;
+		['count'] 		= 0;
+		['timer']      	= 0;
 	}
 	return funcReport
 end
@@ -262,13 +280,29 @@ function ProFi:writeProfilingReportsToFile( reports, file )
 	local totalTime = self.stopTime - self.startTime
 	local totalTimeOutput =  string.format(FORMAT_TOTALTIME_LINE, totalTime)
 	file:write( totalTimeOutput )
-	local header = string.format( FORMAT_HEADER_LINE, "FILE", "FUNCTION", "LINE", "TIME", "RELATIVE", "CALLED" )
+	for i, funcReport in pairs( reports ) do
+		local timerStr = string.format("%04.3f", funcReport.timer)
+		local countStr = string.format("%7i", funcReport.count)
+		local relTimeStr = string.format("%03.2f", (funcReport.timer / totalTime) * 100)
+		if string.len(timerStr) > self.timerWidth then
+			self.timerWidth = string.len(timerStr)
+		end
+		if string.len(countStr) > self.countWidth then
+			self.countWidth = string.len(countStr)
+		end
+		if string.len(relTimeStr) > self.relTimeWidth then
+			self.relTimeWidth = string.len(relTimeStr)
+		end
+	end
+	local headerFormat = "| %-" .. self.sourceWidth + 1 .. "s: %-" .. self.nameWidth + 1 .. "s: %-" .. self.linedefinedWidth + 1 .. "s: %-" .. self.timerWidth + 1 .."s: %-" .. self.relTimeWidth + 1 .. "s: %-" .. self.countWidth .. "s|\n"
+	local outputFormat = "| %-" .. self.sourceWidth + 1 .. "." ..  self.sourceWidth + 1 .. "s: %-" .. self.nameWidth + 1 .. "." .. self.nameWidth + 1 .. "s: %-" .. self.linedefinedWidth + 1 .. "s: %-" .. self.timerWidth + 1 .."s: %-" .. self.relTimeWidth + 1 .. "s:%-" .. self.countWidth + 1 .. "s|\n"
+	local header = string.format( headerFormat, "FILE", "FUNCTION", "LINE", "TIME", "RELATIVE", "CALLED" )
 	file:write( header )
  	for i, funcReport in ipairs( reports ) do
 		local timer         = string.format(FORMAT_TIME, funcReport.timer)
-		local count         = string.format(FORMAT_COUNT, funcReport.count)
+		local count         = string.format("%" .. self.countWidth .. "i", funcReport.count)
 		local relTime 		= string.format(FORMAT_RELATIVE, (funcReport.timer / totalTime) * 100 )
-		local outputLine    = string.format(FORMAT_OUTPUT_LINE, funcReport.title, timer, relTime, count )
+		local outputLine    = string.format(outputFormat, funcReport.source, funcReport.name, funcReport.linedefined, timer, relTime, count )
 		file:write( outputLine )
 		if funcReport.inspections then
 			self:writeInpsectionsToFile( funcReport.inspections, file )
@@ -314,15 +348,16 @@ end
 
 function ProFi:writeInpsectionsToFile( inspections, file )
 	local inspectionsList = self:sortInspectionsIntoList( inspections )
-	file:write('\n==^ INSPECT ^======================================================================================================== COUNT ===\n')
+	local lenBeforeCount = 2 + self.sourceWidth + 1 + 2 + self.nameWidth + 1 + 2 + self.linedefinedWidth + 1 + 2
+	local inspectionFormat = "> %-" .. self.sourceWidth + 1 .. "." ..  self.sourceWidth + 1 .. "s: %-" .. self.nameWidth + 1 .. "." .. self.nameWidth + 1 .. "s: %-" .. self.linedefinedWidth + 1 .. "s:%-" .. self.countWidth + 1 .. "s\n"
+	file:write('\n==^ INSPECT ^' .. string.rep("=", lenBeforeCount - 13) .. " COUNT =\n")
 	for i, inspection in ipairs( inspectionsList ) do
 		local line 			= string.format(FORMAT_LINENUM, inspection.line)
-		local title 		= string.format(FORMAT_TITLE, inspection.source, inspection.name, line)
-		local count 		= string.format(FORMAT_COUNT, inspection.count)
-		local outputLine    = string.format(FORMAT_INSPECTION_LINE, title, count )
+		local count         = string.format("%" .. self.countWidth .. "i", inspection.count)
+		local outputLine    = string.format(inspectionFormat, inspection.source, inspection.name, line, count)
 		file:write( outputLine )
 	end
-	file:write('===============================================================================================================================\n\n')
+	file:write(string.rep("=", lenBeforeCount + 8) .. '\n\n')
 end
 
 function ProFi:sortInspectionsIntoList( inspections )
