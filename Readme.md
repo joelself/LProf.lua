@@ -1,28 +1,28 @@
-## ProFi v1.3, by Luke Perkin 2012. MIT Licence http://www.opensource.org/licenses/mit-license.php.
+## LProf v0.1.0, by Joel Self 2016. MIT Licence http://www.opensource.org/licenses/mit-license.php.
+Based on [ProFi v1.3](https://gist.github.com/perky/2838755), by Luke Perkin 2012. MIT Licence http://www.opensource.org/licenses/mit-license.php. But actually maintained and improved.
 
-
-Origin: https://gist.github.com/perky/2838755
+#### Note, this is baby's first lua project, I've literally never written or modified lua code until now.
 
 ## Example:
   ```lua
-    ProFi = require 'ProFi'
-    ProFi:start()
+    LProf = require 'LProf'
+    LProf:start()
     some_function()
     another_function()
     coroutine.resume( some_coroutine )
-    ProFi:stop()
-    ProFi:writeReport( 'MyProfilingReport.txt' )
+    LProf:stop()
+    LProf:writeReport( 'MyProfilingReport.txt' )
   ```
 
 ## API:
 
   Arguments are specified as: type/name/default.
 
-      ProFi:start( string/once/nil )
-      ProFi:stop()
-      ProFi:checkMemory( number/interval/0, string/note/'' )
-      ProFi:writeReport( string/filename/'ProFi.txt' )
-      ProFi:reset()
-      ProFi:setHookCount( number/hookCount/0 )
-      ProFi:setGetTimeMethod( function/getTimeMethod/os.clock )
-      ProFi:setInspect( string/methodName, number/levels/1 )
+      LProf:start( string/once/nil )
+      LProf:stop()
+      LProf:checkMemory( number/interval/0, string/note/'' )
+      LProf:writeReport( string/filename/'LProf.txt' )
+      LProf:reset()
+      LProf:setHookCount( number/hookCount/0 )
+      LProf:setGetTimeMethod( function/getTimeMethod/os.clock )
+      LProf:setInspect( string/methodName, number/levels/1 )
