@@ -15,6 +15,6 @@ dependencies = {
 build = {
    type = "builtin",
    modules = {
-      LProf = "LProf.lua"
+      LProf = "LProf.lua",
    }
 }
