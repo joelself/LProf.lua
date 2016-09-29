@@ -39,21 +39,23 @@ local FORMAT_MEMORY_LINE 	   = "| %-20s: %-16s: %-16s| %s\n"
 local FORMAT_HIGH_MEMORY_LINE  = "H %-20s: %-16s: %-16sH %s\n"
 local FORMAT_LOW_MEMORY_LINE   = "L %-20s: %-16s: %-16sL %s\n"
 local FORMAT_TITLE             = "%-90.90s: %-30.30s: %-10s"
-local FORMAT_TITLE_KEY		   = "%s : %s : %d"
+local FORMAT_TITLE_KEY         = "%s : %s : %d"
+local FORMAT_STACK_KEY         = "%s :$: %s"
 local FORMAT_LINENUM           = "%4i"
 local FORMAT_TIME              = "%04.6f"
 local FORMAT_RELATIVE          = "%03.4f%%"
 local FORMAT_COUNT             = "%7i"
 local FORMAT_DEPTH             = "%5i"
-local FORMAT_KBYTES  		   = "%7i Kbytes"
-local FORMAT_MBYTES  		   = "%7.1f Mbytes"
+local FORMAT_KBYTES  		       = "%7i Kbytes"
+local FORMAT_MBYTES  		       = "%7.1f Mbytes"
 local FORMAT_MEMORY_HEADER1    = "\n=== HIGH & LOW MEMORY USAGE ===============================\n"
 local FORMAT_MEMORY_HEADER2    = "=== MEMORY USAGE ==========================================\n"
-local FORMAT_BANNER 		   = [[
+local FORMAT_BANNER 		       = [[
 ###############################################################################################################
 #####  LProf, a lua profiler. This profile was generated on: %s
-#####  LProf is created by Luke Perkin 2012 under the MIT Licence, www.locofilm.co.uk
-#####  Version 1.3. Get the most recent version at this gist: https://gist.github.com/2838755
+#####  Hacked together by Joel Self 2016 under the MIT License, https://github.com/joelself/LProf.lua/LICENSE
+#####  Based on Pro.fi by Luke Perkin 2012 under the MIT License, www.locofilm.co.uk
+#####  Version 0.0.1. Not suitable for use. Get the latest version at https://github.com/joelself/LProf.lua
 ###############################################################################################################
 
 ]]
@@ -65,7 +67,7 @@ local FORMAT_BANNER 		   = [[
 -- Since I can't figure out how to call code in other files without luarocks complaining about EVERYTHING
 -- Stack Table
 -- Uses a table as stack, use <table>:push(value) and <table>:pop()
--- Lua 5.1 compatible
+-- Lua 5.2 compatible I guess now
 
 -- GLOBAL
 local Stack = {}
@@ -110,7 +112,7 @@ function Stack:Create()
       end
     end
     -- return unpacked entries
-    return unpack(entries)
+    return table.unpack(entries)
   end
 
   -- peek at the top of the stack
@@ -147,11 +149,11 @@ end
 
 --[[
 	Starts profiling any method that is called between this and LProf:stop().
-	Pass the parameter 'once' to so that this methodis only run once.
+	Pass the parameter 'once' to so that this method is only run once.
 	Example: 
 		LProf:start( 'once' )
 ]]
-function LProf:start( param )
+function LProf:LProfStart( param )
 	if param == 'once' then
 		if self:shouldReturn() then
 			return
@@ -162,14 +164,14 @@ function LProf:start( param )
 	self.has_started  = true
 	self.has_finished = false
 	self:resetReports( self.reports )
+  self.startTime = getTime()
 	self:startHooks()
-	self.startTime = getTime()
 end
 
 --[[
 	Stops profiling.
 ]]
-function LProf:stop()
+function LProf:LProfStop()
 	if self:shouldReturn() then 
 		return
 	end
@@ -177,7 +179,7 @@ function LProf:stop()
 	self:stopHooks()
 	self.has_finished = true
 	local funcInfo = debug.getinfo( 2, 'nS' )
-	LProf:onFunctionReturn( funcInfo )
+	-- LProf:onFunctionReturn( funcInfo )
 end
 
 function LProf:checkMemory( interval, note )
@@ -272,15 +274,15 @@ end
 --[[
 	Allows you to inspect a specific method.
 	Will write to the report a list of methods that
-	call this method you're inspecting, you can optionally
-	provide a levels parameter to traceback a number of levels.
+	are called by the method you're inspecting, you can optionally
+	provide a depth parameter to set how deep you want to inspect the method's call stacks.
 	Params: [methodName:string] the name of the method you wish to inspect.
-	        [levels:number:optional] the amount of levels you wish to traceback, defaults to 1.
+	        [depth:number:optional] the depth up to which you want to inspect a method's call stacks, defaults to 1.
 ]]
-function LProf:setInspect( methodName, levels )
+function LProf:setInspect( methodName, depth )
 	-- print("setting method name: " .. methodName .. " to inspect up to levels: " .. levels)
 	if self.inspect[methodName] == nil then
-		self.inspect[methodName] = levels or 1
+		self.inspect[methodName] = depth or 1
 		-- print(string.format("Set inspect on %s, %d", methodName, self.inspect[methodName]))
 	else
 		-- print(string.format("Tried to set inspection on method %s more than once.", methodName))
@@ -304,11 +306,13 @@ function LProf:startHooks()
 		['count'] 		= {};
 		['timer']      	= {};
 		['callees'] 	= {};
+		['tailcall'] = false;
+		['key'] = "$$ROOT$$";
 	}
 	self.prevReport = Stack:Create()  
 	self.prevReport:push(self.firstReport)
 	-- print(string.format("stack size %d\n", self.prevReport:getn()))
-	self.prevReport:push(LProf:onFunctionCall( funcInfo ))
+	-- self.prevReport:push(LProf:onFunctionCall( funcInfo ))
 	debug.sethook( onDebugHook, 'cr', self.hookCount )
 end
 
@@ -375,17 +379,17 @@ end
 function LProf:RecurseStackVisit(stack, totalTime, indent, outputFormat, header, file, max_max_depth)
 	if ( stack == nil ) or ( type(stack) ~= "table" ) then
 		if ( type(stack) ~= "table" ) then
-			-- print("Somehow a non-stack got passed into RecurseStackVisit: " .. type(stack))
+			 print("Somehow a non-stack got passed into RecurseStackVisit: " .. type(stack))
 		else
-			-- print("Somehow a nil stack got passed into RecurseStackVisit.")
+			 print("Somehow a nil stack got passed into RecurseStackVisit.")
 		end
-		return;
+		return
 	end
 	local top = stack:peek()
 	if top ~= nil then
-		-- print(string.format("Stack depth: %d, current top: %s, number of children: %d", stack:getn(), stack:peek().name, #stack:peek().callees))
+		 print(string.format("Stack depth: %d, current top: %s, number of children: %d", stack:getn(), stack:peek().name, #stack:peek().callees))
 	else
-		-- print(string.format("Stack depth: %d", stack:getn() or -1))
+		 print(string.format("Stack depth: %d", stack:getn() or -1))
 	end
 	while stack:getn() == 0 do return end
 	local top = stack:peek()
@@ -393,12 +397,10 @@ function LProf:RecurseStackVisit(stack, totalTime, indent, outputFormat, header,
 	local depth = 0
 	if top ~= nil then
 		if stack:getn() > 1 then
-			indent = string.rep("|  ", stack:getn() - 1) .. "|--"
-		else
-			indent = "***"
+			indent = string.rep("|  ", stack:getn() - 2) .. "|-- "
 		end
 		table.sort(top.callees, sortMethod)
-		-- print(string.format("Callees: %d", self:tablelength(top.callees)))
+		 print(string.format("Callees: %d", self:tablelength(top.callees)))
 		--file:write( header )
 	 	for i, funcReport in pairs( top.callees ) do
 	 		if max_max_depth - depth > 6 then
@@ -408,14 +410,14 @@ function LProf:RecurseStackVisit(stack, totalTime, indent, outputFormat, header,
 	 		else
 	 			effective_depth = max_max_depth - depth
 	 		end
-	 		local outputFormat = "%s %-" .. self.nameWidth + 13 - effective_depth*2 .. "." .. self.nameWidth + 13 - effective_depth*2 .. "s: %-" .. self.sourceWidth + 1 .. "." ..  self.sourceWidth + 1 .. "s: %-" .. self.linedefinedWidth + 1 .. "s: %-" .. self.timerWidth + 1 .."s: %-" .. self.relTimeWidth + 1 .. "s:%-" .. self.countWidth + 1 .. "s|\n"
-	
-	 		-- print(string.format("Processing child of method %s. Function: %s", top.name, funcReport.name))
+	 		local outputFormat = "%s%-" .. self.nameWidth + 13 - effective_depth*2 .. "." .. self.nameWidth + 13 - effective_depth*2 .. "s: %-" .. self.sourceWidth + 1 .. "." ..  self.sourceWidth + 1 .. "s: %-" .. self.linedefinedWidth + 1 .. "s: %-" .. self.timerWidth + 1 .."s: %-" .. self.relTimeWidth + 1 .. "s:%-" .. self.countWidth + 1 .. "s|\n"
+
+	 		 print(string.format("Processing child of method %s. Function: %s", top.name, funcReport.name))
 			local timer         = string.format(FORMAT_TIME, funcReport.timer[top.name])
 			local count         = string.format("%" .. self.countWidth .. "i", funcReport.count[top.name])
 			local relTime 		= string.format(FORMAT_RELATIVE, (funcReport.timer[top.name] / totalTime) * 100 )
 			local outputLine    = string.format(outputFormat, indent, funcReport.name, funcReport.source, funcReport.linedefined, timer, relTime, count )
-			-- print(outputLine)
+			 print(outputLine)
 			file:write( outputLine )
 			if funcReport.inspections then
 				self:writeInpsectionsToFile( funcReport.inspections, file )
@@ -423,7 +425,7 @@ function LProf:RecurseStackVisit(stack, totalTime, indent, outputFormat, header,
 			local skip = false
 			for t = 1, stack:getn() do
 
-				-- print("t name: " .. stack:peek(t).name .. " funcReport name " .. funcReport.name)
+				 print("t name: " .. stack:peek(t).name .. " funcReport name " .. funcReport.name)
 				if stack:peek(t).name == funcReport.name then
 					skip = true
 					break
@@ -437,7 +439,7 @@ function LProf:RecurseStackVisit(stack, totalTime, indent, outputFormat, header,
 			end
 		end
 	end
-	-- print("Stack pop.")
+	 print("Stack pop.")
 	depth = depth - 1
 	_ = stack:pop()
 	indent = string.sub(indent, 3)
@@ -600,19 +602,19 @@ function LProf:doInspection( levels, funcReport )
 end
 
 function LProf:getFuncReport( funcInfo, ret)
-	local title = self:getTitleFromFuncInfo( funcInfo )
-	-- print("Generated title: " .. title)
+	local title = self:getTitleFromFuncInfo( funcInfo, ret )
+	 print("Generated title: " .. title)
 	local funcReport = self.reportsByTitle[ title ]
 
 	if not funcReport then
-		funcReport = self:createFuncReport( funcInfo )
+		funcReport = self:createFuncReport( funcInfo, title )
 		self.reportsByTitle[ title ] = funcReport
 		table.insert( self.reports, funcReport )
 	end
 	if self.prevReport:peek().callees[title] == nil and not ret then
 		self.prevReport:peek().callees[title] = funcReport
-		-- print(string.format("Adding child %s to parent %s\nTITLE: %s, Parent TITLE: %s : %s : %d", funcReport.name, self.prevReport:peek().name, title, self.prevReport:peek().source, self.prevReport:peek().name, self.prevReport:peek().linedefined))
-		-- print(string.format("Parent %s now has %d children. Callee name: XK", self.prevReport:peek().name, self:tablelength(self.prevReport:peek().callees)))
+		 print(string.format("Adding child %s to parent %s\nTITLE: %s, Parent TITLE: %s", funcReport.name, self.prevReport:peek().name, title, self.prevReport:peek().key))
+		 print(string.format("Parent %s now has %d children. Callee name: %s", self.prevReport:peek().name, self:tablelength(self.prevReport:peek().callees), title))
 	end
 
 	return funcReport
@@ -624,21 +626,24 @@ function LProf:tablelength(T)
   return count
 end
 
-function LProf:getTitleFromFuncInfo( funcInfo )
+function LProf:getTitleFromFuncInfo( funcInfo, ret )
+  if ret then
+    return self.prevReport:peek().key
+  end
 	local name        = funcInfo.name or 'anonymous'
 	local source      = funcInfo.short_src or 'C_FUNC'
 	local linedefined = funcInfo.linedefined or 0
-	return string.format(FORMAT_TITLE_KEY, source, name, linedefined)
+	return string.format(FORMAT_STACK_KEY, self.prevReport:peek().key, string.format(FORMAT_TITLE_KEY, source, name, linedefined))
 end
 
 function LProf:getTitleFromFuncReport( funcReport )
 	local name        = funcReport.name or 'anonymous'
 	local source      = funcReport.source or 'C_FUNC'
 	local linedefined = funcReport.linedefined or 0
-	return string.format(FORMAT_TITLE_KEY, source, name, linedefined)
+	return string.format(FORMAT_STACK_KEY, self.prevReport:peek().key, string.format(FORMAT_TITLE_KEY, source, name, linedefined))
 end
 
-function LProf:createFuncReport( funcInfo )
+function LProf:createFuncReport( funcInfo, title )
 	local name = funcInfo.name or 'anonymous'
 	local source = funcInfo.source or 'C Func'
 	local linedefined = funcInfo.linedefined or 0
@@ -662,6 +667,8 @@ function LProf:createFuncReport( funcInfo )
 		['callTime']    = 0.0;
 		['parent']      = '';
 		['id']			= -1;
+		['tailcall'] = funcInfo.istailcall;
+		['key'] = title;
 	}
 	return funcReport
 end
@@ -703,12 +710,19 @@ function LProf:onFunctionReturn( funcInfo )
 	-- 	self.prevReport:pop()
 	-- end
 	local funcReport = LProf:getFuncReport( funcInfo, true )
-	-- print("id: " .. funcReport.id .. " parent " .. funcReport.parent .. " ")
+	print("id: " .. funcReport.id .. " parent " .. funcReport.parent .. " ")
 
 	while self.prevReport:getn() > 1 do
-		if self.prevReport:peek().name == "$$ROOT$$" or funcReport.parent == self.prevReport:peek().name then
+		if self.prevReport:peek().name == "$$ROOT$$" then
 			break
 		end
+		
+   if funcReport.parent == self.prevReport:peek().name then
+     if funcReport.tailcall then
+       self.prevReport:pop()
+     end
+     break
+   end
 		self.prevReport:pop()
 	end
 	local prev = self.prevReport:peek()
@@ -745,13 +759,24 @@ end
 -- Local Functions:
 -----------------------
 
+function string.ends(String,End)
+   return End=='' or string.sub(String,-string.len(End))==End
+end
+
 getTime = socket.gettime
 
 onDebugHook = function( hookType )
-	local funcInfo = debug.getinfo( 2, 'nS' )
-	if hookType == "call" then
+	local funcInfo = debug.getinfo( 2, "nSt" )
+	print("Hook type: " .. hookType .. ", func name: " .. (funcInfo.name or "anonymous"))
+--  print("call eval: " .. tostring(hookType == "call" and (funcInfo.name ~= "LProfStart" and funcInfo.name ~= "LProfStop")))
+--  print("return eval: " .. tostring(hookType == "return" and (funcInfo.name ~= "LProfStart" and funcInfo.name ~= "LProfStop")))
+	
+--	for n, v in pairs(funcInfo) do print(n .. ": " .. tostring(v)) end
+	if hookType == "call" or hookType == "tail call" then
+	  print("onFunctionCall: " .. (funcInfo.name or "anonymous"))
 		LProf:onFunctionCall( funcInfo )
 	elseif hookType == "return" then
+    print("onFunctionReturn: " .. (funcInfo.name or "anonymous"))
 		LProf:onFunctionReturn( funcInfo )
 	end
 end
