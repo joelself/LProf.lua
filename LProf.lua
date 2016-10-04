@@ -178,7 +178,7 @@ function LProf:LProfStop()
 	self.stopTime = getTime()
 	self:stopHooks()
 	self.has_finished = true
-	local funcInfo = debug.getinfo( 2, 'nS' )
+	local funcInfo = debug.getinfo( 2, "nS" )
 	-- LProf:onFunctionReturn( funcInfo )
 end
 
@@ -603,10 +603,11 @@ end
 
 function LProf:getFuncReport( funcInfo, ret)
 	local title = self:getTitleFromFuncInfo( funcInfo, ret )
-	--  print("Generated title: " .. title)
+	print("Generated title: " .. title)
 	local funcReport = self.reportsByTitle[ title ]
 
 	if not funcReport then
+		print("not funcReport")
 		funcReport = self:createFuncReport( funcInfo, title )
 		self.reportsByTitle[ title ] = funcReport
 		table.insert( self.reports, funcReport )
@@ -671,6 +672,10 @@ function LProf:createFuncReport( funcInfo, title )
 		['tailcall'] = funcInfo.istailcall;
 		['key'] = title;
 	}
+	for k,v in pairs(funcInfo) do
+		io.write(string.format("%s: %s, ", k, v))
+	end
+	io.write("\n")
 	return funcReport
 end
 call_count = 0
@@ -678,7 +683,7 @@ return_count = 0
 id = 0
 function LProf:onFunctionCall( funcInfo )
 	call_count = call_count + 1
-	-- print("onFuncCall: " .. (funcInfo.name or 'anonymous') .. ", prev size: " .. self.prevReport:getn() .. " call count: " .. call_count)
+	print("onFuncCall: " .. (funcInfo.name or 'anonymous') .. ", prev size: " .. self.prevReport:getn() .. " call count: " .. call_count)
 	local prev = self.prevReport:peek()
 	local funcReport = LProf:getFuncReport( funcInfo, false )
 	funcReport.parent = prev.key;
@@ -687,6 +692,7 @@ function LProf:onFunctionCall( funcInfo )
 	funcReport.id = id
 	id = id + 1
 	-- print(string.format("^^^ Getting calltime %f, for id %d with prevName: %s", funcReport.callTime, funcReport.id, prev.name))
+	print(string.format("funcReport with %s\nparent: %s", funcReport.key, funcReport.parent))
 	if funcReport.count[prev.name] == nil then
 		funcReport.count[prev.name] = 0
 	else
@@ -708,17 +714,17 @@ end
 
 function LProf:onFunctionReturn( funcInfo )
 	return_count = return_count + 1
-	-- print("onFuncReturn: " .. (funcInfo.name or 'anonymous') .. ", prev size: " .. self.prevReport:getn() .. " return count: " .. return_count)
+	print("onFuncReturn: " .. (funcInfo.name or 'anonymous') .. ", prev size: " .. self.prevReport:getn() .. " return count: " .. return_count)
 	-- if self.prevReport:getn() > 1 then
 	-- 	self.prevReport:pop()
 	-- end
 	local funcReport = LProf:getFuncReport( funcInfo, true )
 	-- print("id: " .. funcReport.id .. " parent " .. funcReport.parent .. " ")
-	print(string.format("Find parent report of %s\nparent: %s", funcInfo.key, funcInfo.parent))
-	while funcReport.tailcall do
-		-- self.prevReport:pop()
-		funcReport = funcReport.parent_call
-	end
+	print(string.format("TailCall: %s, Find parent report of %s\nparent: %s", funcReport.tailcall, funcReport.key, funcReport.parent))
+	-- while funcReport.tailcall do
+	-- 	-- self.prevReport:pop()
+	-- 	funcReport = funcReport.parent_call
+	-- end
 	while self.prevReport:getn() > 1 do
 		print("")
 		if self.prevReport:peek().key == "$$ROOT$$" then
@@ -772,18 +778,29 @@ end
 getTime = socket.gettime
 
 onDebugHook = function( hookType )
-	local funcInfo = debug.getinfo( 2, "nSt" )
+	local funcInfo = debug.getinfo( 2, "nS" )
+	local depth = 3
+	local funcInfo3 = debug.getinfo( depth, "nS" )
+	while funcInfo3 ~= nil do
+		io.write("depth " .. tostring(depth) .. ": ")
+		for n, v in pairs(funcInfo3) do io.write(n .. ": " .. tostring(v) .. ", ") end
+		io.write("\n")
+		depth = depth + 1
+		funcInfo3 = debug.getinfo( depth, "nS" )
+	end
+	-- local funcInfo = debug.getinfo(funcInfoMaybe.func, "S")
 	-- print("Hook type: " .. hookType .. ", func name: " .. (funcInfo.name or "anonymous"))
 --  print("call eval: " .. tostring(hookType == "call" and (funcInfo.name ~= "LProfStart" and funcInfo.name ~= "LProfStop")))
 --  print("return eval: " .. tostring(hookType == "return" and (funcInfo.name ~= "LProfStart" and funcInfo.name ~= "LProfStop")))
 	
 --	for n, v in pairs(funcInfo) do print(n .. ": " .. tostring(v)) end
+	print(string.format("hooktype: %s", hookType))
 	if hookType == "call" or hookType == "tail call" then
 	--   print("onFunctionCall: " .. (funcInfo.name or "anonymous"))
-		LProf:onFunctionCall( funcInfo )
+		LProf:onFunctionCall( funcInfo, funcInfo3 )
 	elseif hookType == "return" then
     -- print("onFunctionReturn: " .. (funcInfo.name or "anonymous"))
-		LProf:onFunctionReturn( funcInfo )
+		LProf:onFunctionReturn( funcInfo, funcInfo3 )
 	end
 end
 
